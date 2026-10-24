@@ -360,7 +360,15 @@ def _compute_dtype(hidden: torch.Tensor) -> torch.dtype:
 def _project(tile, hidden_chunk, weight, bias, start, end, dtype):
     # FP32 projection output avoids rounding logits before computing the divergence.
     w = weight[start:end].to(dtype).t()
-    if _MM_OUT_DTYPE and tile.device.type == "cuda" and dtype in (torch.float16, torch.bfloat16):
+    # The bf16 GEMM with an fp32 output requires compute capability 8.0 or higher (not available on T4 or V100)
+    if (
+        _MM_OUT_DTYPE
+        and tile.device.type == "cuda"
+        and (
+            dtype == torch.float16
+            or (dtype == torch.bfloat16 and torch.cuda.get_device_capability(tile.device)[0] >= 8)
+        )
+    ):
         torch.mm(hidden_chunk, w, out_dtype=torch.float32, out=tile)
     else:
         torch.mm(hidden_chunk.float(), w.float(), out=tile)

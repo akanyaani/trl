@@ -37,6 +37,7 @@ from .testing_utils import (
     TrlTestCase,
     ignore_warnings,
     is_ampere_or_newer,
+    is_bf16_supported,
     require_bitsandbytes,
     require_kernels,
     require_liger_kernel,
@@ -2110,6 +2111,28 @@ class TestSFTTrainer(TrlTestCase):
         dataset = load_dataset("trl-internal-testing/zen", "standard_language_modeling", split="train")
 
         training_args = SFTConfig(output_dir=self.tmp_dir, fp16=True, report_to="none")
+        trainer = SFTTrainer(
+            model="trl-internal-testing/tiny-Qwen2ForCausalLM-2.5", args=training_args, train_dataset=dataset
+        )
+
+        previous_trainable_params = {n: param.clone() for n, param in trainer.model.named_parameters()}
+
+        trainer.train()
+
+        assert trainer.state.log_history[-1]["train_loss"] is not None
+
+        # Check that the params have changed
+        for n, param in previous_trainable_params.items():
+            new_param = trainer.model.get_parameter(n)
+            assert not torch.equal(param, new_param), f"Parameter {n} has not changed."
+
+    @pytest.mark.skipif(not is_bf16_supported(), reason="test requires bf16 support")
+    def test_train_with_bf16(self):
+        # Also covers GPUs that emulate bf16 (compute capability < 8.0, e.g. T4), where cuBLAS has no bf16 GEMM with
+        # an fp32 output for the fused LM head backward
+        dataset = load_dataset("trl-internal-testing/zen", "standard_language_modeling", split="train")
+
+        training_args = SFTConfig(output_dir=self.tmp_dir, bf16=True, report_to="none")
         trainer = SFTTrainer(
             model="trl-internal-testing/tiny-Qwen2ForCausalLM-2.5", args=training_args, train_dataset=dataset
         )

@@ -56,7 +56,15 @@ def _addmm_fp32(acc: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> None:
     Rounding every vocabulary chunk's product to bf16 before summing them biases training (entropy drifts lower over a
     few dozen steps), even though each step's gradient error looks the same size as with full logits.
     """
-    if _MM_OUT_DTYPE and acc.device.type == "cuda" and a.dtype in (torch.float16, torch.bfloat16):
+    # The bf16 GEMM with an fp32 output requires compute capability 8.0 or higher (not available on T4 or V100)
+    if (
+        _MM_OUT_DTYPE
+        and acc.device.type == "cuda"
+        and (
+            a.dtype == torch.float16
+            or (a.dtype == torch.bfloat16 and torch.cuda.get_device_capability(acc.device)[0] >= 8)
+        )
+    ):
         torch.addmm(acc, a, b, out_dtype=torch.float32, out=acc)
     else:
         acc.addmm_(a.float(), b.float())
